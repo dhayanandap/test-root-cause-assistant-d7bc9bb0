@@ -141,9 +141,11 @@ const Index = () => {
               
               <TabsContent value="failures" className="space-y-4">
                 {result.failures.length > 0 ? (
-                  result.failures.map((failure, index) => (
-                    <FailureCard key={failure.testCase.id || index} failure={failure} />
-                  ))
+                  result.failures
+                    .filter((failure) => failure && failure.testCase)
+                    .map((failure, index) => (
+                      <FailureCard key={failure.testCase?.id || `failure-${index}`} failure={failure} />
+                    ))
                 ) : (
                   <div className="text-center py-12 text-muted-foreground">
                     <div className="rounded-full bg-green-100 dark:bg-green-900 p-4 w-fit mx-auto mb-4">

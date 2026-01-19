@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { FailureAnalysis, CATEGORY_LABELS, DefectCategory } from '@/types/analysis';
+import { FailureAnalysis, CATEGORY_LABELS, DefectCategory, TestCase } from '@/types/analysis';
 import { cn } from '@/lib/utils';
 
 interface FailureCardProps {
@@ -28,7 +28,14 @@ const CONFIDENCE_COLORS = {
 
 export function FailureCard({ failure }: FailureCardProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const Icon = CATEGORY_ICONS[failure.category];
+  const Icon = CATEGORY_ICONS[failure.category] || Bug;
+  const testCase: TestCase = failure.testCase || { 
+    id: 'unknown', 
+    name: 'Unknown Test', 
+    className: 'Unknown Class',
+    status: 'fail',
+    duration: 0
+  };
   
   return (
     <Card className="overflow-hidden">
@@ -42,10 +49,10 @@ export function FailureCard({ failure }: FailureCardProps) {
                 </div>
                 <div className="flex-1 min-w-0">
                   <CardTitle className="text-base font-semibold truncate">
-                    {failure.testCase.name}
+                    {testCase.name}
                   </CardTitle>
                   <p className="text-sm text-muted-foreground mt-1 truncate">
-                    {failure.testCase.className}
+                    {testCase.className}
                   </p>
                 </div>
               </div>
@@ -53,10 +60,10 @@ export function FailureCard({ failure }: FailureCardProps) {
               <div className="flex items-center gap-2 flex-shrink-0">
                 <Badge variant="outline" className="flex items-center gap-1.5">
                   <Icon className="h-3 w-3" />
-                  <span className="hidden sm:inline">{CATEGORY_LABELS[failure.category]}</span>
+                  <span className="hidden sm:inline">{CATEGORY_LABELS[failure.category] || 'Unknown'}</span>
                 </Badge>
-                <Badge className={cn('capitalize', CONFIDENCE_COLORS[failure.confidence])}>
-                  {failure.confidence}
+                <Badge className={cn('capitalize', CONFIDENCE_COLORS[failure.confidence] || CONFIDENCE_COLORS.low)}>
+                  {failure.confidence || 'low'}
                 </Badge>
                 <Button variant="ghost" size="icon" className="h-8 w-8">
                   {isOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -73,20 +80,20 @@ export function FailureCard({ failure }: FailureCardProps) {
               <p className="text-sm text-muted-foreground">{failure.rootCause}</p>
             </div>
             
-            {failure.testCase.errorMessage && (
+            {testCase.errorMessage && (
               <div>
                 <h4 className="text-sm font-semibold mb-2">Error Message</h4>
                 <pre className="text-xs bg-card p-3 rounded-md overflow-x-auto font-mono border">
-                  {failure.testCase.errorMessage}
+                  {testCase.errorMessage}
                 </pre>
               </div>
             )}
             
-            {failure.testCase.stackTrace && (
+            {testCase.stackTrace && (
               <div>
                 <h4 className="text-sm font-semibold mb-2">Stack Trace</h4>
                 <pre className="text-xs bg-card p-3 rounded-md overflow-x-auto font-mono border max-h-48 overflow-y-auto">
-                  {failure.testCase.stackTrace}
+                  {testCase.stackTrace}
                 </pre>
               </div>
             )}
