@@ -24,9 +24,9 @@ serve(async (req) => {
   try {
     const { testCases, rawContent } = await req.json();
     
-    if (!testCases || !Array.isArray(testCases)) {
+    if (!rawContent && (!testCases || !Array.isArray(testCases))) {
       return new Response(
-        JSON.stringify({ error: 'Test cases array is required' }),
+        JSON.stringify({ error: 'Report content is required' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
@@ -40,48 +40,56 @@ serve(async (req) => {
       );
     }
 
-    const failedTests = testCases.filter((t: TestCase) => t.status === 'fail');
-    const skippedTests = testCases.filter((t: TestCase) => t.status === 'skip');
-    const passedTests = testCases.filter((t: TestCase) => t.status === 'pass');
+    const parsedTests = testCases || [];
+    const failedFromParsing = parsedTests.filter((t: TestCase) => t.status === 'fail');
+    const skippedFromParsing = parsedTests.filter((t: TestCase) => t.status === 'skip');
+    const passedFromParsing = parsedTests.filter((t: TestCase) => t.status === 'pass');
 
-    console.log(`Analyzing ${failedTests.length} failed tests out of ${testCases.length} total`);
+    console.log(`Parsed: ${parsedTests.length} tests (${failedFromParsing.length} failed, ${passedFromParsing.length} passed, ${skippedFromParsing.length} skipped)`);
 
-    // Build analysis prompt
-    const failureDetails = failedTests.map((t: TestCase) => `
-Test: ${t.name}
-Class: ${t.className}
-Error: ${t.errorMessage || 'No error message'}
-Stack Trace: ${t.stackTrace || 'No stack trace'}
-Logs: ${t.logs?.join('\n') || 'No logs'}
-`).join('\n---\n');
+    // Build comprehensive analysis prompt
+    const systemPrompt = `You are an expert test automation engineer specializing in analyzing Spark Extent Reports and test execution results. Your task is to ACCURATELY extract and analyze test results from the provided report content.
 
-    const systemPrompt = `You are an expert test automation engineer and defect analyzer. Your task is to analyze test failures from Spark Extent Reports and identify root causes.
+CRITICAL INSTRUCTIONS:
+1. FIRST, carefully extract ALL test cases from the raw content. Look for:
+   - Test names, method names, or scenario names
+   - Status indicators (pass/fail/skip/error)
+   - Error messages, exceptions, and stack traces
+   - Execution times and timestamps
 
-For each failure, you must:
-1. Identify the most likely root cause
-2. Classify the defect into one of these categories:
-   - application_defect: Bug in the application under test
-   - automation_script_defect: Issue with the test script itself
-   - test_data_issue: Problem with test data or data dependencies
-   - environment_issue: Environment instability, network issues, infrastructure problems
-   - configuration_issue: Misconfiguration in test setup or environment
-   - flaky_test: Intermittent failures due to timing, race conditions, etc.
-3. Provide confidence level (high, medium, low)
-4. List supporting evidence from the error messages and stack traces
-5. Suggest a specific fix
+2. For each FAILED test, determine:
+   - Root cause category (MUST be one of: application_defect, automation_script_defect, test_data_issue, environment_issue, configuration_issue, flaky_test)
+   - Confidence level (high/medium/low)
+   - Specific evidence from the report
+   - Actionable fix recommendation
 
-You should also identify patterns across multiple failures and provide prioritized recommendations.
+3. Identify patterns across failures
 
-Respond ONLY with valid JSON matching this exact structure:
+4. Provide prioritized recommendations
+
+ACCURACY IS CRITICAL. Extract the EXACT test names and error messages from the report. Do not make up test names or errors.
+
+Respond with ONLY valid JSON in this exact structure:
 {
+  "extractedTests": [
+    {
+      "id": "unique-id",
+      "name": "exact test name from report",
+      "className": "test class or suite name",
+      "status": "pass|fail|skip",
+      "errorMessage": "exact error message if failed",
+      "stackTrace": "stack trace if available"
+    }
+  ],
   "failures": [
     {
-      "testId": "string",
-      "rootCause": "string describing the root cause",
-      "category": "one of the category values",
+      "testId": "matching id from extractedTests",
+      "testName": "exact test name",
+      "rootCause": "detailed analysis of why this test failed",
+      "category": "one of the valid categories",
       "confidence": "high|medium|low",
-      "evidence": ["array of evidence points"],
-      "suggestedFix": "specific fix recommendation"
+      "evidence": ["specific evidence from the report"],
+      "suggestedFix": "specific actionable fix"
     }
   ],
   "patterns": [
@@ -96,24 +104,51 @@ Respond ONLY with valid JSON matching this exact structure:
       "priority": "high|medium|low",
       "title": "short title",
       "description": "detailed description",
-      "actionItems": ["specific action items"]
+      "actionItems": ["specific actions"]
     }
-  ]
+  ],
+  "summary": {
+    "total": number,
+    "passed": number,
+    "failed": number,
+    "skipped": number
+  }
 }`;
 
-    const userPrompt = failedTests.length > 0 
-      ? `Analyze these ${failedTests.length} test failures:
+    let userPrompt = `Analyze this Spark Extent Report and provide 100% accurate results:
 
-${failureDetails}
+`;
 
-${rawContent ? `Additional context from the report:\n${rawContent.substring(0, 5000)}` : ''}
+    // Include parsed test data if available
+    if (parsedTests.length > 0) {
+      userPrompt += `=== PRE-PARSED TEST DATA ===
+${JSON.stringify(parsedTests, null, 2)}
 
-Provide a comprehensive root cause analysis for each failure.`
-      : `The test report shows ${passedTests.length} passed tests and ${skippedTests.length} skipped tests, with no failures. Provide recommendations for the skipped tests if any.
+`;
+    }
 
-${rawContent ? `Context from the report:\n${rawContent.substring(0, 2000)}` : ''}`;
+    // Include raw content for AI to extract additional info
+    if (rawContent) {
+      // Limit content size but keep as much as possible
+      const contentLimit = 25000;
+      const trimmedContent = rawContent.length > contentLimit 
+        ? rawContent.substring(0, contentLimit) + '\n...[content truncated]...'
+        : rawContent;
+      
+      userPrompt += `=== RAW REPORT CONTENT ===
+${trimmedContent}
 
-    console.log("Calling AI gateway for analysis...");
+`;
+    }
+
+    userPrompt += `
+IMPORTANT: 
+- Extract ALL test cases with their EXACT names and statuses
+- For failed tests, analyze the root cause based on error messages and stack traces
+- Be precise and accurate - do not invent or assume information not in the report
+- If the report shows all tests passed, report that accurately`;
+
+    console.log("Calling AI gateway for comprehensive analysis...");
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -127,7 +162,7 @@ ${rawContent ? `Context from the report:\n${rawContent.substring(0, 2000)}` : ''
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.3,
+        temperature: 0.1, // Lower temperature for more accurate/deterministic output
       }),
     });
 
@@ -167,16 +202,23 @@ ${rawContent ? `Context from the report:\n${rawContent.substring(0, 2000)}` : ''
       if (jsonMatch) {
         jsonStr = jsonMatch[1].trim();
       }
+      // Also try to find JSON object directly
+      const directJsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (directJsonMatch) {
+        jsonStr = directJsonMatch[0];
+      }
       analysisResult = JSON.parse(jsonStr);
     } catch (parseError) {
       console.error("Failed to parse AI response:", parseError);
-      console.log("Raw content:", content);
+      console.log("Raw content:", content?.substring(0, 500));
       
-      // Provide fallback analysis
+      // Use parsed data as fallback
       analysisResult = {
-        failures: failedTests.map((t: TestCase) => ({
+        extractedTests: parsedTests,
+        failures: failedFromParsing.map((t: TestCase) => ({
           testId: t.id,
-          rootCause: t.errorMessage || "Unable to determine root cause automatically",
+          testName: t.name,
+          rootCause: t.errorMessage || "Unable to determine root cause - manual review required",
           category: "automation_script_defect",
           confidence: "low",
           evidence: [t.errorMessage || "No error message available"],
@@ -187,34 +229,75 @@ ${rawContent ? `Context from the report:\n${rawContent.substring(0, 2000)}` : ''
           {
             priority: "high",
             title: "Manual Review Required",
-            description: "AI analysis was unable to parse the failures completely. Manual review is recommended.",
+            description: "AI analysis encountered parsing issues. Please review the report manually for complete accuracy.",
             actionItems: ["Review each failure manually", "Check test logs for more context"]
           }
-        ]
+        ],
+        summary: {
+          total: parsedTests.length,
+          passed: passedFromParsing.length,
+          failed: failedFromParsing.length,
+          skipped: skippedFromParsing.length
+        }
       };
     }
 
-    // Calculate summary
-    const totalDuration = testCases.reduce((sum: number, t: TestCase) => sum + (t.duration || 0), 0);
-    const summary = {
-      total: testCases.length,
-      passed: passedTests.length,
-      failed: failedTests.length,
-      skipped: skippedTests.length,
-      duration: totalDuration > 60 ? `${(totalDuration / 60).toFixed(1)}m` : `${totalDuration.toFixed(1)}s`,
-      passRate: testCases.length > 0 ? (passedTests.length / testCases.length) * 100 : 0,
+    // Use AI-extracted tests if available, otherwise use parsed tests
+    const finalTests = analysisResult.extractedTests?.length > 0 
+      ? analysisResult.extractedTests 
+      : parsedTests;
+    
+    const finalPassed = finalTests.filter((t: any) => t.status === 'pass');
+    const finalFailed = finalTests.filter((t: any) => t.status === 'fail');
+    const finalSkipped = finalTests.filter((t: any) => t.status === 'skip');
+
+    // Use AI summary if provided, otherwise calculate
+    const summaryData = analysisResult.summary || {
+      total: finalTests.length,
+      passed: finalPassed.length,
+      failed: finalFailed.length,
+      skipped: finalSkipped.length
     };
 
-    // Map failures back to test cases
-    const mappedFailures = analysisResult.failures.map((f: any) => {
-      const testCase = failedTests.find((t: TestCase) => t.id === f.testId) || failedTests[0];
+    const totalDuration = finalTests.reduce((sum: number, t: any) => sum + (t.duration || 0), 0);
+    
+    const summary = {
+      total: summaryData.total || finalTests.length,
+      passed: summaryData.passed || finalPassed.length,
+      failed: summaryData.failed || finalFailed.length,
+      skipped: summaryData.skipped || finalSkipped.length,
+      duration: totalDuration > 60 ? `${(totalDuration / 60).toFixed(1)}m` : `${totalDuration.toFixed(1)}s`,
+      passRate: summaryData.total > 0 
+        ? ((summaryData.passed || finalPassed.length) / summaryData.total) * 100 
+        : 0,
+    };
+
+    // Map failures to include testCase objects
+    const mappedFailures = (analysisResult.failures || []).map((f: any, idx: number) => {
+      // Find matching test case
+      const matchingTest = finalTests.find((t: any) => 
+        t.id === f.testId || 
+        t.name === f.testName ||
+        t.name?.toLowerCase() === f.testName?.toLowerCase()
+      );
+      
+      const testCase: TestCase = matchingTest || {
+        id: f.testId || `failure-${idx}`,
+        name: f.testName || 'Unknown Test',
+        className: 'Unknown Class',
+        status: 'fail' as const,
+        duration: 0,
+        errorMessage: f.evidence?.[0],
+        stackTrace: f.evidence?.slice(1)?.join('\n')
+      };
+      
       return {
         testCase,
-        rootCause: f.rootCause,
-        category: f.category,
-        confidence: f.confidence,
+        rootCause: f.rootCause || 'Analysis pending',
+        category: f.category || 'automation_script_defect',
+        confidence: f.confidence || 'medium',
         evidence: f.evidence || [],
-        suggestedFix: f.suggestedFix,
+        suggestedFix: f.suggestedFix || 'Review test implementation',
       };
     });
 
@@ -226,7 +309,11 @@ ${rawContent ? `Context from the report:\n${rawContent.substring(0, 2000)}` : ''
     };
 
     console.log("Analysis complete:", {
-      failures: mappedFailures.length,
+      total: summary.total,
+      passed: summary.passed,
+      failed: summary.failed,
+      skipped: summary.skipped,
+      failuresAnalyzed: mappedFailures.length,
       patterns: result.patterns.length,
       recommendations: result.recommendations.length
     });
