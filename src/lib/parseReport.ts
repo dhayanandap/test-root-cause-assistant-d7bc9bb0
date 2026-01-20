@@ -1,4 +1,4 @@
-import { TestCase } from '@/types/analysis';
+import { TestCase, Screenshot } from '@/types/analysis';
 
 export function parseSparkExtentReport(htmlContent: string): TestCase[] {
   const parser = new DOMParser();
@@ -109,6 +109,60 @@ export function parseSparkExtentReport(htmlContent: string): TestCase[] {
       });
     });
     
+    // Extract steps to reproduce from test steps/logs
+    const stepsToReproduce: string[] = [];
+    const stepSelectors = ['.step', '.test-step', '.log-step', '.step-name', '.step-details', '.node-step', 'li.step'];
+    stepSelectors.forEach(sel => {
+      const stepEls = node.querySelectorAll(sel);
+      stepEls.forEach(el => {
+        const stepText = el.textContent?.trim();
+        if (stepText && stepText.length > 5 && stepText.length < 500) {
+          stepsToReproduce.push(stepText);
+        }
+      });
+    });
+    
+    // Also try to extract steps from structured logs
+    if (stepsToReproduce.length === 0) {
+      const logEls = node.querySelectorAll('.log, .test-log, [class*="step"]');
+      logEls.forEach(el => {
+        const text = el.textContent?.trim();
+        if (text && text.length > 5 && text.length < 300 && !text.includes('Exception')) {
+          stepsToReproduce.push(text);
+        }
+      });
+    }
+    
+    // Extract screenshots (base64 encoded images)
+    const screenshots: Screenshot[] = [];
+    const imgSelectors = ['img[src^="data:image"]', 'img.screenshot', '.screenshot img', '.test-img img', '.media img'];
+    imgSelectors.forEach(sel => {
+      const imgEls = node.querySelectorAll(sel);
+      imgEls.forEach((img, imgIdx) => {
+        const src = (img as HTMLImageElement).src;
+        if (src?.startsWith('data:image')) {
+          const match = src.match(/data:([^;]+);base64,(.+)/);
+          if (match) {
+            screenshots.push({
+              name: `screenshot-${testCases.length + 1}-${imgIdx + 1}.png`,
+              mimeType: match[1],
+              base64Data: match[2],
+            });
+          }
+        }
+      });
+    });
+    
+    // Also look for screenshot links/attachments
+    const screenshotLinks = node.querySelectorAll('a[href*="screenshot"], a[href*="image"], .screenshot-link');
+    screenshotLinks.forEach((link, linkIdx) => {
+      const href = (link as HTMLAnchorElement).href;
+      if (href && (href.includes('.png') || href.includes('.jpg') || href.includes('.jpeg'))) {
+        // Note: We can't fetch external URLs here, but we note them
+        logs.push(`Screenshot available: ${href}`);
+      }
+    });
+    
     // Extract class name
     const classSelectors = ['.class-name', '.category', '.test-class', '.package'];
     let className = '';
@@ -139,6 +193,8 @@ export function parseSparkExtentReport(htmlContent: string): TestCase[] {
         errorMessage: errorMessage || undefined,
         stackTrace: stackTrace || undefined,
         logs: logs.length > 0 ? logs : undefined,
+        stepsToReproduce: stepsToReproduce.length > 0 ? stepsToReproduce : undefined,
+        screenshots: screenshots.length > 0 ? screenshots : undefined,
         timestamp: new Date().toISOString(),
       });
     }

@@ -1,14 +1,16 @@
-import { ChevronDown, ChevronUp, AlertTriangle, Bug, Database, Server, Settings, Zap } from 'lucide-react';
+import { ChevronDown, ChevronUp, AlertTriangle, Bug, Database, Server, Settings, Zap, Image } from 'lucide-react';
 import { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { FailureAnalysis, CATEGORY_LABELS, DefectCategory, TestCase } from '@/types/analysis';
+import { CreateJiraIssueButton } from '@/components/CreateJiraIssueButton';
 import { cn } from '@/lib/utils';
 
 interface FailureCardProps {
   failure: FailureAnalysis;
+  onJiraIssueCreated?: (issueKey: string) => void;
 }
 
 const CATEGORY_ICONS: Record<DefectCategory, React.ComponentType<{ className?: string }>> = {
@@ -26,7 +28,7 @@ const CONFIDENCE_COLORS = {
   low: 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200',
 };
 
-export function FailureCard({ failure }: FailureCardProps) {
+export function FailureCard({ failure, onJiraIssueCreated }: FailureCardProps) {
   const [isOpen, setIsOpen] = useState(false);
   const Icon = CATEGORY_ICONS[failure.category] || Bug;
   const testCase: TestCase = failure.testCase || { 
@@ -75,10 +77,35 @@ export function FailureCard({ failure }: FailureCardProps) {
         
         <CollapsibleContent>
           <CardContent className="border-t bg-muted/30 space-y-4">
+            {/* JIRA Integration for Application Defects */}
+            {failure.category === 'application_defect' && (
+              <div className="flex items-center justify-between py-2 px-3 bg-primary/5 rounded-md border border-primary/20">
+                <span className="text-sm font-medium">Application Defect Detected</span>
+                <CreateJiraIssueButton 
+                  failure={failure} 
+                  onIssueCreated={onJiraIssueCreated}
+                />
+              </div>
+            )}
+            
             <div>
               <h4 className="text-sm font-semibold mb-2">Root Cause Analysis</h4>
               <p className="text-sm text-muted-foreground">{failure.rootCause}</p>
             </div>
+            
+            {/* Steps to Reproduce */}
+            {testCase.stepsToReproduce && testCase.stepsToReproduce.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold mb-2">Steps to Reproduce</h4>
+                <ol className="list-decimal list-inside space-y-1">
+                  {testCase.stepsToReproduce.map((step, index) => (
+                    <li key={index} className="text-sm text-muted-foreground">
+                      {step}
+                    </li>
+                  ))}
+                </ol>
+              </div>
+            )}
             
             {testCase.errorMessage && (
               <div>
@@ -95,6 +122,37 @@ export function FailureCard({ failure }: FailureCardProps) {
                 <pre className="text-xs bg-card p-3 rounded-md overflow-x-auto font-mono border max-h-48 overflow-y-auto">
                   {testCase.stackTrace}
                 </pre>
+              </div>
+            )}
+            
+            {/* Screenshots */}
+            {testCase.screenshots && testCase.screenshots.length > 0 && (
+              <div>
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                  <Image className="h-4 w-4" />
+                  Screenshots ({testCase.screenshots.length})
+                </h4>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                  {testCase.screenshots.map((screenshot, index) => (
+                    <div key={index} className="relative group">
+                      <img
+                        src={`data:${screenshot.mimeType};base64,${screenshot.base64Data}`}
+                        alt={screenshot.name}
+                        className="rounded-md border w-full h-24 object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                        onClick={() => {
+                          // Open in new tab
+                          const win = window.open();
+                          if (win) {
+                            win.document.write(`<img src="data:${screenshot.mimeType};base64,${screenshot.base64Data}" />`);
+                          }
+                        }}
+                      />
+                      <span className="absolute bottom-1 left-1 text-xs bg-background/80 px-1 rounded">
+                        {screenshot.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
             

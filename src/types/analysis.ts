@@ -8,6 +8,14 @@ export interface TestCase {
   stackTrace?: string;
   logs?: string[];
   timestamp?: string;
+  stepsToReproduce?: string[];
+  screenshots?: Screenshot[];
+}
+
+export interface Screenshot {
+  name: string;
+  base64Data: string;
+  mimeType: string;
 }
 
 export interface AnalysisResult {
@@ -31,6 +39,7 @@ export interface FailureAnalysis {
   confidence: 'high' | 'medium' | 'low';
   evidence: string[];
   suggestedFix: string;
+  jiraIssueKey?: string;
 }
 
 export type DefectCategory = 
@@ -54,6 +63,20 @@ export interface Recommendation {
   actionItems: string[];
 }
 
+export interface JiraCredentials {
+  baseUrl: string;
+  email: string;
+  apiKey: string;
+  projectKey: string;
+}
+
+export interface JiraIssueResponse {
+  success: boolean;
+  issueKey?: string;
+  issueUrl?: string;
+  error?: string;
+}
+
 export const CATEGORY_LABELS: Record<DefectCategory, string> = {
   application_defect: 'Application Defect',
   automation_script_defect: 'Automation Script Defect',
@@ -70,4 +93,13 @@ export const CATEGORY_COLORS: Record<DefectCategory, string> = {
   environment_issue: 'outline',
   configuration_issue: 'default',
   flaky_test: 'secondary',
+};
+
+export const CATEGORY_JIRA_PRIORITY: Record<DefectCategory, string> = {
+  application_defect: 'High',
+  automation_script_defect: 'Medium',
+  test_data_issue: 'Low',
+  environment_issue: 'Medium',
+  configuration_issue: 'Low',
+  flaky_test: 'Low',
 };
