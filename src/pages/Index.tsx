@@ -5,13 +5,14 @@ import { AnalysisSummary } from '@/components/AnalysisSummary';
 import { FailureCard } from '@/components/FailureCard';
 import { RecommendationsPanel } from '@/components/RecommendationsPanel';
 import { AnalysisLoader } from '@/components/AnalysisLoader';
+import { JiraSettingsDialog } from '@/components/JiraSettingsDialog';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { parseSparkExtentReport, extractRawContent } from '@/lib/parseReport';
 import { AnalysisResult } from '@/types/analysis';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
-import { RefreshCw, FileText, AlertTriangle, Lightbulb } from 'lucide-react';
+import { RefreshCw, FileText, AlertTriangle, Lightbulb, Bug } from 'lucide-react';
 
 const Index = () => {
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -62,9 +63,12 @@ const Index = () => {
       
       setResult(data);
       
+      // Count application defects
+      const appDefects = data.failures.filter((f: any) => f.category === 'application_defect').length;
+      
       toast({
         title: "Analysis Complete",
-        description: `Found ${data.summary.failed} failures out of ${data.summary.total} tests.`,
+        description: `Found ${data.summary.failed} failures out of ${data.summary.total} tests.${appDefects > 0 ? ` ${appDefects} application defect(s) can be logged to JIRA.` : ''}`,
       });
     } catch (error) {
       console.error('Analysis error:', error);
@@ -83,6 +87,26 @@ const Index = () => {
     setFileName(null);
   }, []);
 
+  const handleJiraIssueCreated = useCallback((testId: string, issueKey: string) => {
+    if (!result) return;
+    
+    // Update the result with the JIRA issue key
+    setResult(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        failures: prev.failures.map(f => 
+          f.testCase?.id === testId 
+            ? { ...f, jiraIssueKey: issueKey }
+            : f
+        ),
+      };
+    });
+  }, [result]);
+
+  // Count application defects for the tab
+  const applicationDefectsCount = result?.failures.filter(f => f.category === 'application_defect').length || 0;
+
   return (
     <div className="min-h-screen bg-background">
       <Header />
@@ -96,6 +120,9 @@ const Index = () => {
                 Upload your Spark Extent Report and let AI identify root causes, 
                 classify defects, and provide actionable recommendations.
               </p>
+              <div className="mt-4">
+                <JiraSettingsDialog />
+              </div>
             </div>
             <FileUpload onFileSelect={handleFileSelect} isLoading={isLoading} />
           </div>
@@ -109,7 +136,7 @@ const Index = () => {
         
         {result && !isLoading && (
           <div className="space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-4">
               <div>
                 <h2 className="text-2xl font-bold">Analysis Results</h2>
                 {fileName && (
@@ -119,13 +146,28 @@ const Index = () => {
                   </p>
                 )}
               </div>
-              <Button variant="outline" onClick={handleReset}>
-                <RefreshCw className="h-4 w-4 mr-2" />
-                New Analysis
-              </Button>
+              <div className="flex items-center gap-2">
+                <JiraSettingsDialog />
+                <Button variant="outline" onClick={handleReset}>
+                  <RefreshCw className="h-4 w-4 mr-2" />
+                  New Analysis
+                </Button>
+              </div>
             </div>
             
             <AnalysisSummary result={result} />
+            
+            {applicationDefectsCount > 0 && (
+              <div className="flex items-center gap-2 p-4 bg-primary/5 border border-primary/20 rounded-lg">
+                <Bug className="h-5 w-5 text-primary" />
+                <span className="font-medium">
+                  {applicationDefectsCount} Application Defect{applicationDefectsCount !== 1 ? 's' : ''} detected
+                </span>
+                <span className="text-sm text-muted-foreground">
+                  — Click on each failure to create a JIRA issue
+                </span>
+              </div>
+            )}
             
             <Tabs defaultValue="failures" className="space-y-6">
               <TabsList className="grid w-full grid-cols-2 max-w-md">
@@ -144,7 +186,11 @@ const Index = () => {
                   result.failures
                     .filter((failure) => failure && failure.testCase)
                     .map((failure, index) => (
-                      <FailureCard key={failure.testCase?.id || `failure-${index}`} failure={failure} />
+                      <FailureCard 
+                        key={failure.testCase?.id || `failure-${index}`} 
+                        failure={failure}
+                        onJiraIssueCreated={(issueKey) => handleJiraIssueCreated(failure.testCase?.id || '', issueKey)}
+                      />
                     ))
                 ) : (
                   <div className="text-center py-12 text-muted-foreground">
